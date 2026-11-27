@@ -182,3 +182,27 @@ func TestConnectionFailureDoesNotRevealTheKey(t *testing.T) {
 		t.Errorf("key in error: %v", err)
 	}
 }
+
+func TestKeyWithSurroundingWhitespaceIsTrimmed(t *testing.T) {
+	s, client := newStub(t, 200, fixture(t, "lookup"))
+	padded, err := NewClient("  "+testKey+"\n", WithBaseURL(client.baseURL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := padded.Lookup("8.8.8.8", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.requests[0].Header.Get("Authorization"); got != "Bearer "+testKey {
+		t.Errorf("Authorization = %q", got)
+	}
+}
+
+func TestKeyWithInvalidCharactersIsRejectedWithoutRepeatingIt(t *testing.T) {
+	_, err := NewClient("sk.secret_part\nmore")
+	if err == nil || strings.Contains(err.Error(), "secret_part") {
+		t.Errorf("got %v", err)
+	}
+	if _, err := NewClient("  \n"); err == nil {
+		t.Error("a blank key should be rejected")
+	}
+}

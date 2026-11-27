@@ -254,8 +254,13 @@ type Client struct {
 // apiKey is required. Additional options can be provided via ClientOption
 // functions such as WithBaseURL or WithHTTPClient.
 func NewClient(apiKey string, opts ...ClientOption) (*Client, error) {
+	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		return nil, errors.New("ipwho: apiKey is required")
+	}
+	// The key is sent in a header. Reject it here, without repeating it.
+	if strings.IndexFunc(apiKey, func(r rune) bool { return r < ' ' || r > '~' }) >= 0 {
+		return nil, errors.New("ipwho: apiKey contains characters that are not allowed")
 	}
 	c := &Client{
 		apiKey:     apiKey,
