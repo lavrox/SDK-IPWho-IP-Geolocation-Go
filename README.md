@@ -50,6 +50,8 @@ IpGeoResponse
     └── UserAgent *UserAgent
 ```
 
+The client sends your API key in the `Authorization` header, so it isn't part of the request URL.
+
 Optional JSON fields are **pointers**. Check before dereference.
 
 ## Reading the full response (8.8.8.8)
@@ -99,18 +101,24 @@ me, err := client.Me(nil)
 fmt.Println(me.Data.IP)
 
 bulk, err := client.Bulk([]string{"8.8.8.8", "1.1.1.1"}, nil)
-for _, item := range bulk {
-	fmt.Println(item.Data.IP, *item.Data.GeoLocation.Country)
+for _, row := range bulk {
+	if !row.Success {
+		fmt.Println(row.Data.IP, *row.Message)
+		continue
+	}
+	if geo := row.Data.GeoLocation; geo != nil && geo.Country != nil {
+		fmt.Println(row.Data.IP, *geo.Country)
+	}
 }
 ```
 
-`LookupOptions`: `Format` (`json`/`xml`/`csv`), `Fields` (comma-separated filter). Pass `nil` for defaults. Bulk is JSON only and returns `[]IpGeoResponse` in request order.
+`LookupOptions`: `Format` (`json`/`xml`/`csv`), `Fields` (comma-separated filter). Pass `nil` for defaults. Bulk is JSON only and returns `[]IpGeoResponse` in request order. Check each row's `Success`. A failed row has a `Message`, and its `Data` holds only the `IP`.
 
 ## API Reference
 
 ### `NewClient(apiKey string, opts ...ClientOption) (*Client, error)`
 
-`WithBaseURL`, `WithHTTPClient`. Empty key returns an error. Query param: `apiKey`.
+`WithBaseURL`, `WithHTTPClient`. Empty key returns an error. The key is sent as `Authorization: Bearer`.
 
 ### `Lookup(ip string, opts *LookupOptions) (*IpGeoResponse, error)`
 
@@ -164,6 +172,12 @@ JSON tags match the live wire (`postal_Code`, `flag_Icon`, `isVpn`, `asn_number`
 - Nil pointers: city and user-agent are often unset on anycast IPs.
 
 ## Testing
+
+```bash
+go test ./...
+```
+
+These tests need no API key: they run against a local stand-in server. For a live check, which uses lookups from your quota:
 
 ```bash
 IPWHO_API_KEY=your_key go run ./cmd/check

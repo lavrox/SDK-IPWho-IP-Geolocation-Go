@@ -150,6 +150,37 @@ type BulkResponseData struct {
 	ResponseArray []IpGeoResponse `json:"responseArray,omitempty"`
 }
 
+// UnmarshalJSON reads bulk rows. The API sends each row flat:
+// {success, ip, geoLocation, ...} or {success: false, ip, message}.
+// Rows already nested under "data" are accepted too.
+func (d *BulkResponseData) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		ResponseArray []json.RawMessage `json:"responseArray"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	d.ResponseArray = nil
+	if raw.ResponseArray == nil {
+		return nil
+	}
+	rows := make([]IpGeoResponse, len(raw.ResponseArray))
+	for i, item := range raw.ResponseArray {
+		if err := json.Unmarshal(item, &rows[i]); err != nil {
+			return err
+		}
+		if rows[i].Data == nil {
+			data := &GeoData{}
+			if err := json.Unmarshal(item, data); err != nil {
+				return err
+			}
+			rows[i].Data = data
+		}
+	}
+	d.ResponseArray = rows
+	return nil
+}
+
 // BulkResponse is the top-level wrapper for /bulk/ endpoint responses.
 type BulkResponse struct {
 	Success bool              `json:"success"`
@@ -249,12 +280,14 @@ func (c *Client) Me(opts *LookupOptions) (*IpGeoResponse, error) {
 
 // Bulk performs geolocation lookups for multiple IP addresses in a single request.
 // The returned slice contains one IpGeoResponse per IP address in the same order.
+// Check each row's Success. A failed row has a Message, and its Data holds only
+// the IP.
 func (c *Client) Bulk(ips []string, opts *LookupOptions) ([]IpGeoResponse, error) {
 	if len(ips) == 0 {
 		return nil, errors.New("ipwho: ips must not be empty")
 	}
 	bulkParam := strings.Join(ips, ",")
-	// For bulk, we use LookupOptions for query params (apiKey is added automatically)
+	// For bulk, we use LookupOptions for query params
 	params := c.buildParams(opts)
 	// Remove any "format" param that isn't json — bulk only returns JSON
 	delete(params, "format")
@@ -332,8 +365,8 @@ func (c *Client) doGet(path string, opts *LookupOptions) (*IpGeoResponse, error)
 
 // buildParams constructs the query parameters from LookupOptions.
 func (c *Client) buildParams(opts *LookupOptions) url.Values {
+	// The API key is not a query parameter: doRequest sends it in a header.
 	params := url.Values{}
-	params.Set("apiKey", c.apiKey)
 	if opts != nil {
 		if opts.Format != "" && opts.Format != "json" {
 			params.Set("format", opts.Format)
@@ -353,6 +386,7 @@ func (c *Client) doRequest(urlStr string, params url.Values) ([]byte, int, error
 	}
 	req.URL.RawQuery = params.Encode()
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("User-Agent", fmt.Sprintf("ipwho-go-sdk/%s", Version))
 
 	resp, err := c.httpClient.Do(req)
